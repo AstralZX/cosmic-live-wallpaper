@@ -101,14 +101,14 @@ class App(Adw.Application):
         sidebar.append(lib_label)
 
         add_files_btn = Gtk.Button(icon_name="list-add-symbolic", label="Add Video Files")
-        add_files_btn.set_xalign(0); add_files_btn.add_css_class("flat")
+        add_files_btn.add_css_class("flat")
         add_files_btn.set_margin_start(8); add_files_btn.set_margin_end(8)
         add_files_btn.set_margin_top(4)
         add_files_btn.connect("clicked", self.add_files)
         sidebar.append(add_files_btn)
 
         add_folder_btn = Gtk.Button(icon_name="folder-open-symbolic", label="Add Folder")
-        add_folder_btn.set_xalign(0); add_folder_btn.add_css_class("flat")
+        add_folder_btn.add_css_class("flat")
         add_folder_btn.set_margin_start(8); add_folder_btn.set_margin_end(8)
         add_folder_btn.set_margin_top(4)
         add_folder_btn.connect("clicked", self.add_folder)
