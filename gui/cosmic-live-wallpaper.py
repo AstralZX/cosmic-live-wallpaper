@@ -103,7 +103,7 @@ class App(Adw.Application):
         vbox.append(hb)
 
         sw = Adw.ViewSwitcher()
-        self.stack = Gtk.Stack()
+        self.stack = Adw.ViewStack()
         sw.set_stack(self.stack)
         hb.set_title_widget(sw)
 

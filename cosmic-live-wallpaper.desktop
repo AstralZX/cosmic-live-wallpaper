@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=COSMIC Live Wallpaper
-Comment=Animated wallpaper for COSMIC desktop
+Comment=Set animated video wallpapers on your COSMIC desktop via Wayland layer-shell and GStreamer
 Exec=cosmic-live-wallpaper
-Icon=video-display
+Icon=cosmic-live-wallpaper
 Terminal=false
 Categories=Utility;System;
 Keywords=wallpaper;video;live;animated;cosmic;
