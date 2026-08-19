@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 
-import subprocess, signal, os, json, sys, time, glob, hashlib, traceback
+import subprocess, signal, os, json, sys, time, glob, hashlib, threading
 
 CONFIG_DIR = os.path.join(GLib.get_user_config_dir(), "cosmic-live-wallpaper")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -55,6 +55,7 @@ class App(Adw.Application):
         self.proc = None
         self._cfg = cfg()
         self._lib = lib()
+        self._watch_id = None
         try:
             r = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=3)
             self.outputs = [l.split()[0] for l in r.stdout.splitlines()
@@ -63,166 +64,148 @@ class App(Adw.Application):
         self.connect("activate", self.build)
 
     def build(self, app):
-        self.win = Adw.ApplicationWindow(application=app, default_width=820, default_height=560,
+        self.win = Adw.ApplicationWindow(application=app, default_width=860, default_height=560,
                                           title="COSMIC Live Wallpaper")
         self.toast_ov = Adw.ToastOverlay()
         self.win.set_content(self.toast_ov)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.toast_ov.set_child(outer)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.toast_ov.set_child(vbox)
 
-        # Header bar
         hb = Adw.HeaderBar()
-        outer.append(hb)
+        vbox.append(hb)
 
-        # Sidebar style: Paned with sidebar + content
-        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        paned.set_wide_handle(True)
-        outer.append(paned)
+        sw = Adw.ViewSwitcher()
+        self.stack = Adw.ViewStack()
+        sw.set_stack(self.stack)
+        hb.set_title_widget(sw)
 
-        # === Left sidebar ===
-        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, width_request=200)
-        sidebar.add_css_class("sidebar")
-        paned.set_start_child(sidebar)
+        # ── Library Tab ──
+        lib_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.stack.add_titled(lib_page, "library", "Library")
 
-        # Sidebar title
-        side_title = Gtk.Label(label="COSMIC Live Wallpaper")
-        side_title.add_css_class("heading")
-        side_title.set_margin_top(12); side_title.set_margin_bottom(8)
-        side_title.set_margin_start(12); side_title.set_xalign(0)
-        sidebar.append(side_title)
-
-        sep = Gtk.Separator(); sidebar.append(sep)
-
-        # Library section
-        lib_label = Gtk.Label(label="  Library")
-        lib_label.set_xalign(0); lib_label.set_margin_top(8); lib_label.set_margin_bottom(4)
-        lib_label.set_opacity(0.5); lib_label.add_css_class("caption")
-        sidebar.append(lib_label)
-
-        add_files_btn = Gtk.Button(icon_name="list-add-symbolic", label="Add Video Files")
-        add_files_btn.add_css_class("flat")
-        add_files_btn.set_margin_start(8); add_files_btn.set_margin_end(8)
-        add_files_btn.set_margin_top(4)
+        lib_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
+                              margin_top=8, margin_bottom=8, margin_start=12, margin_end=12)
+        add_files_btn = Gtk.Button(icon_name="list-add-symbolic", label="Add Videos")
+        add_files_btn.add_css_class("suggested-action")
         add_files_btn.connect("clicked", self.add_files)
-        sidebar.append(add_files_btn)
+        lib_toolbar.append(add_files_btn)
 
         add_folder_btn = Gtk.Button(icon_name="folder-open-symbolic", label="Add Folder")
-        add_folder_btn.add_css_class("flat")
-        add_folder_btn.set_margin_start(8); add_folder_btn.set_margin_end(8)
-        add_folder_btn.set_margin_top(4)
         add_folder_btn.connect("clicked", self.add_folder)
-        sidebar.append(add_folder_btn)
+        lib_toolbar.append(add_folder_btn)
 
-        sep2 = Gtk.Separator(); sidebar.append(sep2)
+        refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Refresh library")
+        refresh_btn.connect("clicked", lambda _: self.refresh_grid())
+        lib_toolbar.append(refresh_btn)
 
-        # Settings section
-        settings_label = Gtk.Label(label="  Settings")
-        settings_label.set_xalign(0); settings_label.set_margin_top(8); settings_label.set_margin_bottom(4)
-        settings_label.set_opacity(0.5); settings_label.add_css_class("caption")
-        sidebar.append(settings_label)
+        lib_page.append(lib_toolbar)
 
-        # Monitor selector
-        mon_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
-                          margin_start=12, margin_end=12, margin_top=4)
-        mon_box.append(Gtk.Label(label="Monitor"))
-        self.dd = Gtk.DropDown(model=Gtk.StringList.new(self.outputs))
-        mon_box.append(self.dd)
-        sidebar.append(mon_box)
-
-        # Mute toggle
-        self.mute = Adw.SwitchRow(title="Mute Audio")
-        self.mute.set_active(self._cfg.get("mute", True))
-        self.mute.connect("notify::active", lambda r, _: (
-            self._cfg.update({"mute": r.get_active()}), save(CONFIG_FILE, self._cfg)))
-        sidebar.append(self.mute)
-
-        # Volume
-        vol_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
-                          margin_start=12, margin_end=12, margin_top=4)
-        vol_box.append(Gtk.Label(label="Vol"))
-        self.vol = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
-        self.vol.set_value(self._cfg.get("volume", 0)); self.vol.set_hexpand(True)
-        vol_box.append(self.vol)
-        sidebar.append(vol_box)
-
-        sep3 = Gtk.Separator(); sidebar.append(sep3)
-
-        # Autostart
-        self.auto = Adw.SwitchRow(title="Start on Login")
-        auto_path = os.path.join(AUTOSTART_DIR, AUTOSTART_DESKTOP)
-        self.auto.set_active(os.path.exists(auto_path))
-        self.auto.connect("notify::active", self.toggle_autostart)
-        sidebar.append(self.auto)
-
-        # === Right content area ===
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        paned.set_end_child(content)
-
-        # Tab bar for content area
-        self.stack = Adw.ViewStack()
-        sw = Adw.ViewSwitcherBar()
-        sw.set_stack(self.stack)
-        content.append(sw)
-
-        # Library page
         lib_scroll = Gtk.ScrolledWindow()
         lib_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self.stack.add_titled(lib_scroll, "library", "Library")
+        lib_scroll.set_vexpand(True)
         self.grid = Gtk.FlowBox(valign=Gtk.Align.START, homogeneous=True,
                                 column_spacing=4, row_spacing=4,
                                 selection_mode=Gtk.SelectionMode.NONE)
         lib_scroll.set_child(self.grid)
+        lib_page.append(lib_scroll)
 
-        # History page
+        # ── Controls Tab ──
+        ctl_scroll = Gtk.ScrolledWindow()
+        ctl_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.stack.add_titled(ctl_scroll, "controls", "Controls")
+
+        ctl = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                      margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+        ctl_scroll.set_child(ctl)
+
+        # Playback group
+        g_play = Adw.PreferencesGroup(title="Playback")
+        self.stat = Adw.ActionRow(title="Status", subtitle="Stopped")
+        g_play.add(self.stat)
+        br = Adw.ActionRow()
+        self.go = Gtk.Button(label="Start"); self.go.add_css_class("suggested-action")
+        self.go.connect("clicked", lambda _: self.start())
+        br.add_suffix(self.go)
+        self.no = Gtk.Button(label="Stop"); self.no.add_css_class("destructive-action")
+        self.no.set_sensitive(False); self.no.connect("clicked", lambda _: self.stop())
+        br.add_suffix(self.no)
+        g_play.add(br)
+        ctl.append(g_play)
+
+        # Monitor group
+        g_mon = Adw.PreferencesGroup(title="Monitor")
+        row = Adw.ActionRow(title="Target Display")
+        self.dd = Gtk.DropDown(model=Gtk.StringList.new(self.outputs))
+        row.add_suffix(self.dd)
+        g_mon.add(row)
+        ctl.append(g_mon)
+
+        # Audio group
+        g_audio = Adw.PreferencesGroup(title="Audio")
+        self.mute = Adw.SwitchRow(title="Mute Audio", subtitle="Recommended for wallpapers")
+        self.mute.set_active(self._cfg.get("mute", True))
+        self.mute.connect("notify::active", lambda r, _: (
+            self._cfg.update({"mute": r.get_active()}), save(CONFIG_FILE, self._cfg)))
+        g_audio.add(self.mute)
+        ar = Adw.ActionRow(title="Volume")
+        self.vol = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
+        self.vol.set_value(self._cfg.get("volume", 0)); self.vol.set_hexpand(True)
+        ar.add_suffix(self.vol)
+        g_audio.add(ar)
+        ctl.append(g_audio)
+
+        # Startup group
+        g_start = Adw.PreferencesGroup(title="Startup")
+        self.auto = Adw.SwitchRow(title="Start on Login")
+        auto_path = os.path.join(AUTOSTART_DIR, AUTOSTART_DESKTOP)
+        self.auto.set_active(os.path.exists(auto_path))
+        self.auto.connect("notify::active", self.toggle_autostart)
+        g_start.add(self.auto)
+        ctl.append(g_start)
+
+        # ── History Tab ──
         hist_scroll = Gtk.ScrolledWindow()
-        hist_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        hist_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.stack.add_titled(hist_scroll, "history", "History")
         self.hlist = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         hist_scroll.set_child(self.hlist)
 
-        # Playback status bar
-        status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
-                             margin_top=4, margin_bottom=4, margin_start=8, margin_end=8)
-        content.append(status_box)
+        # Footer
+        foot = Gtk.CenterBox()
+        lbl = Gtk.Label(label="cosmic-live-wallpaper | GTK4 + layer-shell + GStreamer")
+        lbl.set_opacity(0.4); lbl.add_css_class("caption")
+        foot.set_center_widget(lbl)
+        vbox.append(foot)
 
-        self.stat_label = Gtk.Label(label="Stopped")
-        self.stat_label.set_hexpand(True); self.stat_label.set_xalign(0)
-        self.stat_label.set_opacity(0.7)
-        status_box.append(self.stat_label)
-
-        self.go = Gtk.Button(label="Start")
-        self.go.add_css_class("suggested-action")
-        self.go.connect("clicked", lambda _: self.start())
-        status_box.append(self.go)
-
-        self.no = Gtk.Button(label="Stop")
-        self.no.add_css_class("destructive-action")
-        self.no.set_sensitive(False)
-        self.no.connect("clicked", lambda _: self.stop())
-        status_box.append(self.no)
-
-        # Load content
         self.refresh_grid()
         self.refresh_hist()
         self.win.present()
 
     def refresh_grid(self):
+        self._lib = lib()
         while (c := self.grid.get_first_child()): self.grid.remove(c)
-        for wp in self._lib.get("wallpapers", []):
+        wps = self._lib.get("wallpapers", [])
+        existing = {p for p in [wp.get("path", "") for wp in wps] if p}
+        for wp in wps:
             p = wp.get("path", "")
             if os.path.exists(p):
                 self._add_card(p)
-        if not self._lib.get("wallpapers"):
+        if not wps:
             empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                           valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
             icon = Gtk.Image.new_from_icon_name("folder-videos-symbolic")
             icon.set_pixel_size(64); icon.set_opacity(0.3)
             empty.append(icon)
-            lbl = Gtk.Label(label="No wallpapers yet.\nUse the sidebar to add video files.")
+            lbl = Gtk.Label(label="No wallpapers yet.\nClick \"Add Videos\" to get started.")
             lbl.set_opacity(0.5); lbl.set_justify(Gtk.Justification.CENTER)
             empty.append(lbl)
             self.grid.append(empty)
+        self._last_lib_mtime = self._get_lib_mtime()
+
+    def _get_lib_mtime(self):
+        try: return os.path.getmtime(LIBRARY_FILE)
+        except: return 0
 
     def _add_card(self, path):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -238,8 +221,7 @@ class App(Adw.Application):
             try:
                 texture = Gdk.Texture.new_from_filename(tp)
                 card.append(Gtk.Picture.new_for_paintable(texture))
-            except Exception:
-                card.append(Gtk.Picture.new_from_icon_name("video-x-generic"))
+            except: card.append(Gtk.Picture.new_from_icon_name("video-x-generic"))
         else:
             card.append(Gtk.Picture.new_from_icon_name("video-x-generic"))
 
@@ -295,9 +277,12 @@ class App(Adw.Application):
         n = 0
         for i in range(files.get_n_items()):
             f = files.get_item(i)
-            p = f.get_path() if hasattr(f, 'get_path') else f.get_uri()
+            p = f.get_path() if hasattr(f, 'get_path') else None
             if p: self._add(p); n += 1
-        if n: self.refresh_grid(); self.toast(f"Added {n} wallpaper(s)")
+        if n:
+            self._lib = lib()
+            self.refresh_grid()
+            self.toast(f"Added {n} wallpaper(s)")
 
     def add_folder(self, *a):
         try:
@@ -314,11 +299,15 @@ class App(Adw.Application):
         path = folder.get_path()
         if not path: return
         n = 0
-        for e in VIDEO_EXT:
-            for f in glob.glob(os.path.join(path, f"*{e}")) + glob.glob(os.path.join(path, f"*{e.upper()}")):
+        for ext in VIDEO_EXT:
+            for f in glob.glob(os.path.join(path, f"*{ext}")) + glob.glob(os.path.join(path, f"*{ext.upper()}")):
                 self._add(f); n += 1
-        if n: self.refresh_grid(); self.toast(f"Added {n} from folder")
-        else: self.toast("No videos found in folder")
+        if n:
+            self._lib = lib()
+            self.refresh_grid()
+            self.toast(f"Added {n} from folder")
+        else:
+            self.toast("No videos found in folder")
 
     def _add(self, path):
         path = os.path.abspath(path)
@@ -330,6 +319,7 @@ class App(Adw.Application):
         self._lib["wallpapers"] = [w for w in self._lib["wallpapers"] if w["path"] != path]
         save(LIBRARY_FILE, self._lib)
         self.refresh_grid()
+        self.toast("Removed wallpaper")
 
     def apply_wp(self, path):
         self.stop()
@@ -347,7 +337,7 @@ class App(Adw.Application):
             h.insert(0, {"path": path, "time": time.time()})
             self._lib["history"] = h[:50]; save(LIBRARY_FILE, self._lib)
             self.refresh_hist()
-            self.stat_label.set_text(f"Playing: {os.path.basename(path)}")
+            self.stat.set_subtitle(f"Playing: {os.path.basename(path)}")
             self.no.set_sensitive(True)
             self.toast(f"Playing: {os.path.basename(path)}")
         except Exception as e: self.toast(str(e))
@@ -367,7 +357,7 @@ class App(Adw.Application):
                 except: pass
             self.proc = None
         subprocess.run(["pkill", "-f", BG_BIN], capture_output=True)
-        self.stat_label.set_text("Stopped"); self.no.set_sensitive(False)
+        self.stat.set_subtitle("Stopped"); self.no.set_sensitive(False)
 
     def toggle_autostart(self, row, _):
         enabled = row.get_active()
@@ -389,6 +379,22 @@ class App(Adw.Application):
     def toast(self, msg):
         t = Adw.Toast(title=msg); t.set_timeout(3)
         self.toast_ov.add_toast(t)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        self._last_lib_mtime = self._get_lib_mtime()
+        GLib.timeout_add(2000, self._auto_reload)
+
+    def _auto_reload(self):
+        try:
+            mtime = self._get_lib_mtime()
+            if mtime != self._last_lib_mtime:
+                self._last_lib_mtime = mtime
+                self._lib = lib()
+                self.refresh_grid()
+                self.refresh_hist()
+        except: pass
+        return True
 
 
 def main():
