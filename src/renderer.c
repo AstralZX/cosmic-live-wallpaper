@@ -86,6 +86,16 @@ static void teardown_pipeline(AppData *data) {
     }
 }
 
+static gboolean is_image_uri(const char *uri) {
+    char *lower = g_ascii_strdown(uri, -1);
+    gboolean ret = g_str_has_suffix(lower, ".png") || g_str_has_suffix(lower, ".jpg") ||
+                   g_str_has_suffix(lower, ".jpeg") || g_str_has_suffix(lower, ".webp") ||
+                   g_str_has_suffix(lower, ".bmp") || g_str_has_suffix(lower, ".tiff") ||
+                   g_str_has_suffix(lower, ".tif");
+    g_free(lower);
+    return ret;
+}
+
 static GstElement *build_pipeline(AppData *data) {
     GstElement *pipeline = gst_pipeline_new("wp");
     GstElement *source = gst_element_factory_make("uridecodebin", "src");
@@ -103,12 +113,31 @@ static GstElement *build_pipeline(AppData *data) {
     gst_caps_unref(caps);
     GstAppSinkCallbacks cb = { .new_sample = on_new_sample };
     gst_app_sink_set_callbacks(GST_APP_SINK(sink), &cb, data, NULL);
-    gst_bin_add_many(GST_BIN(pipeline), source, convert, scale, sink, NULL);
-    g_signal_connect(source, "pad-added", G_CALLBACK(pad_added_cb), convert);
-    if (!gst_element_link_many(convert, scale, sink, NULL)) {
-        fprintf(stderr, "Error: failed to link\n");
-        gst_object_unref(pipeline);
-        return NULL;
+
+    if (is_image_uri(data->uri)) {
+        GstElement *freeze = gst_element_factory_make("imagefreeze", "freeze");
+        if (!freeze) {
+            fprintf(stderr, "Error: imagefreeze not available, falling back to basic pipeline\n");
+            gst_bin_add_many(GST_BIN(pipeline), source, convert, scale, sink, NULL);
+            g_signal_connect(source, "pad-added", G_CALLBACK(pad_added_cb), convert);
+            gst_element_link_many(convert, scale, sink, NULL);
+        } else {
+            gst_bin_add_many(GST_BIN(pipeline), source, convert, freeze, scale, sink, NULL);
+            g_signal_connect(source, "pad-added", G_CALLBACK(pad_added_cb), convert);
+            if (!gst_element_link_many(convert, freeze, scale, sink, NULL)) {
+                fprintf(stderr, "Error: failed to link image pipeline\n");
+                gst_object_unref(pipeline);
+                return NULL;
+            }
+        }
+    } else {
+        gst_bin_add_many(GST_BIN(pipeline), source, convert, scale, sink, NULL);
+        g_signal_connect(source, "pad-added", G_CALLBACK(pad_added_cb), convert);
+        if (!gst_element_link_many(convert, scale, sink, NULL)) {
+            fprintf(stderr, "Error: failed to link\n");
+            gst_object_unref(pipeline);
+            return NULL;
+        }
     }
     return pipeline;
 }
