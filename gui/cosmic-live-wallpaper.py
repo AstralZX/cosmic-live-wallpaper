@@ -137,9 +137,7 @@ class App(Adw.Application):
 
         g1 = Adw.PreferencesGroup(title="Monitor")
         row = Adw.ActionRow(title="Target Display")
-        self.dd = Gtk.DropDown()
-        for o in self.outputs: self.dd.append(o, o)
-        if self.outputs: self.dd.set_selected(0)
+        self.dd = Gtk.DropDown(model=Gtk.StringList.new(self.outputs))
         row.add_suffix(self.dd); g1.add(row); ctl.append(g1)
 
         g2 = Adw.PreferencesGroup(title="Playback")
