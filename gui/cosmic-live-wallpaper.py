@@ -138,7 +138,7 @@ class App(Adw.Application):
         sidebar.append(self.mute)
 
         # Volume
-        vol_box = Gtk.Box(orientation=Gtk.HORIZONTAL, spacing=8,
+        vol_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
                           margin_start=12, margin_end=12, margin_top=4)
         vol_box.append(Gtk.Label(label="Vol"))
         self.vol = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
