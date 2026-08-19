@@ -61,9 +61,9 @@ class Card(Gtk.Box):
         if not os.path.exists(tp): gen_thumb(path, tp)
 
         if os.path.exists(tp):
-            self.append(Gtk.picture.new_for_paintable(Gdk.Texture.new_from_filename(tp)))
+            self.append(Gtk.Picture.new_for_paintable(Gdk.Texture.new_from_filename(tp)))
         else:
-            self.append(Gtk.picture.new_from_icon_name("video-x-generic"))
+            self.append(Gtk.Picture.new_from_icon_name("video-x-generic"))
 
         lbl = Gtk.Label(label=os.path.basename(path))
         lbl.set_ellipsize(3); lbl.set_xalign(0)
@@ -205,7 +205,7 @@ class App(Adw.Application):
             r.connect("activated", lambda _, path=p: self.apply_wp(path))
             tp = thumb_path(p)
             if os.path.exists(tp):
-                img = Gtk.picture.new_for_paintable(Gdk.Texture.new_from_filename(tp))
+                img = Gtk.Picture.new_for_paintable(Gdk.Texture.new_from_filename(tp))
                 img.set_size_request(48, 32); r.add_prefix(img)
             self.hlist.append(r)
         if not self._lib.get("history"):
