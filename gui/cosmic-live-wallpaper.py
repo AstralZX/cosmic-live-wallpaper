@@ -183,7 +183,7 @@ class App(Adw.Application):
         self.win.present()
 
     def refresh_grid(self):
-        while (c := self.grid.get_child_at_index(0)): self.grid.remove(c)
+        while (c := self.grid.get_first_child()): self.grid.remove(c)
         for wp in self._lib.get("wallpapers", []):
             p = wp.get("path", "")
             if os.path.exists(p):
@@ -197,7 +197,7 @@ class App(Adw.Application):
             box.append(l); self.grid.append(box)
 
     def refresh_hist(self):
-        while (c := self.hlist.get_child_at_index(0)): self.hlist.remove(c)
+        while (c := self.hlist.get_first_child()): self.hlist.remove(c)
         for e in self._lib.get("history", [])[:30]:
             p, ts = e.get("path", ""), e.get("time", 0)
             t = time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else ""
